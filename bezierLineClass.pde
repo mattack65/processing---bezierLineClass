@@ -44,6 +44,44 @@ class BezierLine {
     calculateControlPoints();  // Adjust to only calculate necessary control points
   }
   
+  void closeCurve() {
+    if (points.size() < 2) return; // Ensure there are enough points to form a curve
+
+    // Set the last point to be the same as the first point
+    points.add(points.get(0));
+
+    // Recalculate control points with the curve now being closed
+    calculateControlPoints();
+
+    // Ensure the first and last control points are adjusted for smooth continuity
+    adjustFirstAndLastControlPoints();
+ }
+
+  private void adjustFirstAndLastControlPoints() {
+    if (points.size() < 3) return; // Ensure there are enough points to form a proper curve
+
+    // The first and last points are assumed to be the same (since the curve is closed)
+    PVector firstPoint = points.get(0);
+    PVector secondPoint = points.get(1);
+    PVector secondLastPoint = points.get(points.size() - 2);
+
+    // Calculate the tangent at the first/last point by averaging the directions from adjacent segments
+    PVector tangentToNext = PVector.sub(secondPoint, firstPoint).normalize(); // Direction towards the second point
+    PVector tangentToPrevious = PVector.sub(firstPoint, secondLastPoint).normalize(); // Direction from the second last point
+
+    // Average the tangents to get a smooth transition at the junction
+    PVector averageTangent = PVector.add(tangentToNext, tangentToPrevious).div(2);
+
+    // Determine control point distances proportional to the distances between relevant points
+    float distToNext = firstPoint.dist(secondPoint) * 0.3f; // Control point distance towards next point
+    float distToPrev = firstPoint.dist(secondLastPoint) * 0.3f; // Control point distance towards previous point
+
+    // Adjust the control points for the first and last anchor points
+    controlPoints.set(0, PVector.add(firstPoint, PVector.mult(averageTangent, distToNext)));
+    controlPoints.set(controlPoints.size() - 1, PVector.sub(firstPoint, PVector.mult(averageTangent, distToPrev)));
+  }
+
+
   void drawAll() {
     // draw the whole line
     drawFromTo(0, points.size()-2);
@@ -168,19 +206,17 @@ class BezierLine {
   }
   
   public String formatNumber(float num) {
-      return String.format(Locale.US, "%.4f", num).replaceAll("0*$", "").replaceAll("\\.$", "");
+    // 3 digits after the comma should be plenty enough for a pen plotter
+    return String.format(Locale.US, "%.3f", num);
   }
+  
 
+  /*
   String toSVGPath() {
     // instead of using beginRecord and endRecord we use our own manual method to create an SVG-file.
     // That way, instead or recording a path for each bezier segement, we can make it one long
     // bezier path and insure, that it will be drawn without a single pen lift.
-    // if it is a bunch of paths, you never know how the plotte-SW will treat it
-    // also: Later, is we wish, we can expand this saving-function to create a new layer every X meter of
-    // line-length, therefore enabling us to print layer by layer and refill the ink or change the pen
-    // before they run out. Many pens only manage about 150 to 250 meters before they run out.
-    // also, we can control the precision. 2 digits after the comma should be plenty enough for 
-    // a pen plotter and keeps the file smaller
+    // if it is a bunch of paths, you never know how the plotter-SW will treat it
     
     StringBuilder pathData = new StringBuilder();
     
@@ -207,15 +243,25 @@ class BezierLine {
 
     return pathData.toString();
   }
-  
-  String toSVGPathsMaxLengthPerPath(float maxLength, int clipStart, int clipEnd) {
-    // as above, but additionally we split the long line up several in paths,
-    // each path with a given max. length (or a bit over it)
-    // This will make it much easier later, to print the line in several installments and re-fill 
-    // the ink in the pen in between paths
-    // Additionally we provide a way to clip a few points at the start and the end
-    // set both params to 0 if you want to write the full line
+  */
 
+  String toSVGPath() {
+    return toSVGPath(0,0,0);
+  }
+  
+  String toSVGPath(float maxLength, int clipStart, int clipEnd) {
+    // instead of using beginRecord and endRecord we use our own manual method to create an SVG-file.
+    // That way, instead or recording a path for each bezier segement, we can make it one long
+    // bezier path and ensure, that it will be drawn without a single pen lift.
+    // If it is just a bunch of small paths, you never know how the plotter-SW will treat it.
+
+    // Additionally we can split the long line up into several paths of given length (assuming 1 unit = 1 mm),
+    // each path with a given max. length (or a bit over it)
+    // This will make it much easier later to plot the line in several installments and re-fill 
+    // the ink in the pen in between paths.
+    
+    // Additionally (added later); we provide a way to clip a few points at the start and the end.
+    // Set both params to 0 if you want to write the full line.
         
     StringBuilder pathData = new StringBuilder();
     float totalLength = 0;
@@ -238,17 +284,19 @@ class BezierLine {
                       formatNumber(cp2.x) + " " + formatNumber(cp2.y) + ", " +
                       formatNumber(end.x) + " " + formatNumber(end.y));
                       
-      // calculate the path length so far
-      totalLength += 
-      bezierLength(points.get(i), controlPoints.get(2*i), controlPoints.get(2*i+1), points.get(i+1), 5);
-      
-      if (totalLength >= maxLength) {
-        // end this path and start a new one
-        pathData.append("\" fill=\"none\" stroke=\"black\" stroke-width=\"0.1\" />\n"); 
-        // 
-        pathData.append("<path d=\"");
-        pathData.append("M" + formatNumber(end.x) + " " + formatNumber(end.y));
-        totalLength = 0;
+      if (maxLength > 0) { // if the parameter is set to 0, we make only one path
+        // calculate the path length so far
+        totalLength += 
+        bezierLength(points.get(i), controlPoints.get(2*i), controlPoints.get(2*i+1), points.get(i+1), 5);
+        
+        if (totalLength >= maxLength) {
+          // end this path and start a new one
+          pathData.append("\" fill=\"none\" stroke=\"black\" stroke-width=\"0.1\" />\n"); 
+          // 
+          pathData.append("<path d=\"");
+          pathData.append("M" + formatNumber(end.x) + " " + formatNumber(end.y));
+          totalLength = 0;
+        }
       }
     }
   
@@ -257,10 +305,14 @@ class BezierLine {
     return pathData.toString();
   }
     
+  float getLength(int samplesPerSegment) {
+    // return the length of the whole line. Usually about 5 samplesPerSegment is precise enough
+    return getLength(0, points.size(), samplesPerSegment);
+  }
   
-  float getLenght(int startIndex, int endIndex, int samplesPerSegment) {
+  float getLength(int startIndex, int endIndex, int samplesPerSegment) {
     // we approximate the total length by approximating the bezier curve with
-    // a number of straight lines. The more samples we take, the more precise it gets (but also slower).
+    // a number of straight lines. The more samples we take, the more precise it gets (but also slower)
     float totalLength = 0.0;
     startIndex = max(startIndex, 0);
     endIndex = min(endIndex, points.size() - 2);
@@ -272,15 +324,25 @@ class BezierLine {
   }
   
   PVector getPointAtPct(float distPct) {
+    // returns the point at a certain distance from the start of the line
+    // the distance is given as a fraction of the total length and has to be between 0.0 and 1.0 (a percentage)
+    
     // Ensure the percentage is between 0.0 and 1.0
     distPct = constrain(distPct, 0.0, 1.0);
   
     // Calculate the total length of the entire Bezier line
-    float totalLength = getLenght(0, points.size() - 2, 100); // Increase samples for more accuracy
+    float totalLength = getLength(100); // Increase samples for more accuracy
   
     // Calculate the target length along the curve based on the percentage
     float targetLength = distPct * totalLength;
   
+    return getPointAtDist(targetLength);
+  }
+
+  PVector getPointAtDist(float dist) {
+    // returns the point at a certain distance from the start of the line
+    // the distance is given in mm and has to be between 0.0 amd the total length of the line
+
     // Variables to accumulate the length and track the previous point
     float accumulatedLength = 0.0;
     PVector prevPoint = points.get(0);
@@ -299,9 +361,9 @@ class BezierLine {
         PVector currentPoint = bezierPoint(p0, p1, p2, p3, t);
         float segmentLength = prevPoint.dist(currentPoint);
   
-        if (accumulatedLength + segmentLength >= targetLength) {
+        if (accumulatedLength + segmentLength >= dist) {
           // Interpolate within this small sub-segment
-          float remainingLength = targetLength - accumulatedLength;
+          float remainingLength = dist - accumulatedLength;
           float interpolationFactor = remainingLength / segmentLength;
           return PVector.lerp(prevPoint, currentPoint, interpolationFactor);
         }
@@ -312,28 +374,68 @@ class BezierLine {
     }
   
     // If we reach here, return the last point on the curve (distPct was 1.0)
-    return points.get(points.size() - 1);
+    return points.get(points.size() - 1);    
   }
 
-  PVector getPointAtDist(float dist) {
-    // Calculate the total length of the entire Bezier line
-    float totalLength = getLenght(0, points.size() - 2, 100); // 100 samples for more accuracy
+  PVector[] getEquidistantPointArr(int numPoints) {
+    // Calculate the total length of the bezier curve
+    float totalLength = getLength(100);  // Or another appropriate number of samples per segment
+    
+    // Determine the distance between each point
+    float distanceBetweenPoints = totalLength / (numPoints - 1);
   
-    // Ensure the distance is within the valid range
-    dist = constrain(dist, 0.0, totalLength);
+    // Array to store the equidistant points
+    PVector[] equidistantPoints = new PVector[numPoints];
+    equidistantPoints[0] = points.get(0);  // Start at the first point
   
-    // Calculate the percentage corresponding to the given distance
-    float distPct = dist / totalLength;
+    // Variables to keep track of progress along the curve
+    float accumulatedLength = 0.0;
+    PVector prevPoint = points.get(0);
+    int currentPointIndex = 1;
   
-    // Call the existing function to get the point at the calculated percentage
-    return getPointAtPct(distPct);
-  }  
-}
+    // Loop over each segment to find equidistant points
+    for (int i = 0; i < points.size() - 1; i++) {
+      PVector p0 = points.get(i);
+      PVector p1 = controlPoints.get(2 * i);
+      PVector p2 = controlPoints.get(2 * i + 1);
+      PVector p3 = points.get(i + 1);
+  
+      int numSamples = 100; // Use a constant number of samples within each segment for precision
+      for (int j = 1; j <= numSamples; j++) {
+        float t = j / (float) numSamples;
+        PVector currentPoint = bezierPoint(p0, p1, p2, p3, t);
+        float segmentLength = prevPoint.dist(currentPoint);
+        
+        // Check if the next equidistant point should be placed within this segment
+        while (accumulatedLength + segmentLength >= currentPointIndex * distanceBetweenPoints && currentPointIndex < numPoints) {
+          float remainingLength = currentPointIndex * distanceBetweenPoints - accumulatedLength;
+          float interpolationFactor = remainingLength / segmentLength;
+          equidistantPoints[currentPointIndex] = PVector.lerp(prevPoint, currentPoint, interpolationFactor);
+          currentPointIndex++;
+        }
+  
+        // Update accumulated length and move to the next segment
+        accumulatedLength += segmentLength;
+        prevPoint = currentPoint;
+      }
+    }
+  
+    // Ensure the last point is the end of the curve
+    if (currentPointIndex < numPoints) {
+      equidistantPoints[currentPointIndex] = points.get(points.size() - 1);
+    }
+  
+    return equidistantPoints;
+  }
+}  
+  
+    
 
 // End of the class
 // here come some more helper functions
 
 String createSVGHeader(int width, int height) {
+  // Create the header of an SVG-File
   StringBuilder svgContent = new StringBuilder();
   // 1. SVG Header
   svgContent.append("<?xml version=\"1.0\" standalone=\"no\"?>\n");
@@ -347,6 +449,7 @@ String createSVGHeader(int width, int height) {
 }
 
 String createSVGHeader(int width, int height, String[] comments) {
+  // Create the header of an SVG-File with some comments
     StringBuilder svgContent = new StringBuilder();
     // 1. SVG Header
     svgContent.append("<?xml version=\"1.0\" standalone=\"no\"?>\n");
@@ -370,10 +473,7 @@ String createSVGHeader(int width, int height, String[] comments) {
 
 
 String createSVGFooter() {
-  StringBuilder svgContent = new StringBuilder();
-  svgContent.append("</svg>");
-  
-  return svgContent.toString();
+  return ("</svg>");
 }  
 
 void saveSVGToFile(String svgContent, String filePath) {
@@ -387,12 +487,9 @@ void saveSVGToFile(String svgContent, String filePath) {
   }
 }
 
-// maybe use later to calculate the total length of a line
-// and to be able to chop up the SVG-output every X meters
-// and maybe pack these bits into different inkscape-layers, so that 
-// we can check and refill the ink every X meters
 
 float bezierLength(PVector p0, PVector p1, PVector p2, PVector p3, int numSamples) {
+  // calculate the length of a bezier segment
   float totalLength = 0;
   PVector prevPoint = p0;
   
@@ -407,6 +504,7 @@ float bezierLength(PVector p0, PVector p1, PVector p2, PVector p3, int numSample
 }
 
 PVector bezierPoint(PVector p0, PVector p1, PVector p2, PVector p3, float t) {
+  // get the point somewhere on a bezier segment. 0 = start. 1 = end of line.
   float u = 1 - t;
   float tt = t*t;
   float uu = u*u;
@@ -421,15 +519,15 @@ PVector bezierPoint(PVector p0, PVector p1, PVector p2, PVector p3, float t) {
   return result;
 }
 
-/*
 
-// TESTING
-// Every time you click left a number of random points get added to the line
-// Every time you click right, the whole line gets saved to a file a the line re-drawn
-// Note: Because we only add a number of points while drawing and only draw the new segmenst, 
-//       The connection between the larger segments is not continuous. We would have to delete the
-//       last bezier curve on the screen and redraw it, but that is messy
-//       instead we draw it all new when saving the file.
+/*
+// TESTING and USAGE EXAMPLE
+// Every time you click left, a number of random points get added to the line
+// Every time you click right, the whole line gets saved to a file and the line re-drawn
+// Note: Because we only add a number of points while drawing and only draw the new segments, 
+//       the connection between the larger segments is not continuous. We would have to delete the
+//       last bezier curve on the screen and redraw it to draw it correctly, but that is slow.
+//       Instead we draw it all new when saving the file.
 //       The line inside the class is always correct, it's just that the last existing segment does not know how the line will later
 //       continue and can therefore not end in the correct angle on the screen. As soon as you add points, this gets corrected.
 
@@ -458,22 +556,28 @@ void mouseClicked() {
     line.addPoints(newPoints);
     // only draw the new ones
     line.drawFromTo(line.points.size() - N - 1, line.points.size()-2);  
-    println(line.getLenght(0, line.points.size(), 5)/1000.0);
+    println(line.getLength(5)/1000.0);
 
-} else {
-    // save the line in an SVG
+  } else {
+
     background(255);
     line.drawAll();
-    // println(line.toSVGPath());
+    // draw it anew and make sure all control points are calculated
     
+    // save the long bezier line in an SVG in a single path
+    // create the file header
     String svgContent = createSVGHeader(width, height);
+    // add the bezier line path
     svgContent += line.toSVGPath();
+    // add the footer
     svgContent += createSVGFooter();
     
-    // println(svgContent);
-    saveSVGToFile(svgContent, sketchPath("output.svg"));
+    // write it a file in the current dorectory
+    String timestamp = year() + "-" + month() + "-" + day() + "_" + hour() + "-" + minute() + "-" + second();
+    saveSVGToFile(svgContent.toString(), sketchPath("output_" + timestamp + ".svg"));
+    println(sketchPath("output_" + timestamp + ".svg") + " written");
     
-    println(line.getLenght(0, line.points.size(), 5)/1000.0);
+    println(line.getLength(5)/1000.0);
 
   }
 }
