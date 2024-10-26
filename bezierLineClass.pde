@@ -2,9 +2,22 @@
 // This class represents a C1 continuous, smooth Bezier curve through all the points that you give it
 // The data contains the anchor-points (given by you) and the control-points (calculated by the class)
 
+// Author: matt@void.ch
+// This class represents a C1 continuous, smooth Bezier curve through all the points that you give it
+// The data contains the anchor-points (given by you) and the control-points (calculated by the class)
+
+// todos: 
+// 1) make the swell factor changeable while the bezier line already exists
+// 2) test and make move() more efficient
+// 3) prevent poinst from being added after the curve has been closed or alternatively implement that case correctly
+// 4) allow sthe curve to be opened again after it had been closed
+// 5) allow the retrieval of other point arrays than just equidistant ones. Allow the handing over of a function that maps 0 ... 1 to 0 .. 1 and returns points in those mapped intervals
+// 6) merging teo bezier curves?
+// 7) find the intersectionpoints between two curves or even within one curve? needed?
+
+
 import java.util.Locale;
 
-float ctrlPointDistFactor = 0.4f; 
 // todo: we could make this now hard-coded factor a parameter and therefore change the "curviness" of the lines.
 // it makes quite a massive difference to how the lines look
 
@@ -13,12 +26,21 @@ class BezierLine {
   ArrayList<PVector> ctrlPointsL;    // these are the control points to the left of each anchor point
   ArrayList<PVector> ctrlPointsR;    // these are the control points to the right of each anchor point
   
-  boolean closedCurve = false;       // initially we assume that the curve is not closed
+  boolean m_closedCurve;       // initially we assume that the curve is not closed
+  float m_swell;               // swell describes how lose or how tight the curce winds around the anchor points. 
+                               // the bigger the number the more oppulent the curves. 
+                               // More than about 0.8 is porbably too much. 0.3 is default.  
   
   BezierLine() {
+    this(0.3f);                // use the default swell
+  }
+    
+  BezierLine(float swell) {
     anchorPoints = new ArrayList<PVector>();
     ctrlPointsL = new ArrayList<PVector>();
     ctrlPointsR = new ArrayList<PVector>();
+    m_swell = swell;
+    m_closedCurve = false;
   }
 
   void addPoint(PVector point) {
@@ -54,8 +76,8 @@ class BezierLine {
   }
   
   void closeCurve() {
-    if (closedCurve || anchorPoints.size() < 3) return; // Ensure there are enough points to form a closed curve and the curve is not already closed
-    closedCurve = true;
+    if (m_closedCurve || anchorPoints.size() < 3) return; // Ensure there are enough points to form a closed curve and the curve is not already closed
+    m_closedCurve = true;
     // Ensure the first and last control points are adjusted for smooth continuity
     UpdateTwoCtrlPoints(0);
     UpdateTwoCtrlPoints(anchorPoints.size()-1);
@@ -64,25 +86,25 @@ class BezierLine {
 
   void drawAll() {
     // draw the whole line
-    drawFromTo(0, anchorPoints.size() - (closedCurve ? 1 : 2));
+    drawFromTo(0, anchorPoints.size() - (m_closedCurve ? 1 : 2));
   }
   
   void drawAllTranslate(PVector transVec) {
     // draw the whole line
-    drawFromToTranslate(0, anchorPoints.size() - (closedCurve ? 1 : 2), transVec);
+    drawFromToTranslate(0, anchorPoints.size() - (m_closedCurve ? 1 : 2), transVec);
   }
   
 
   void drawFrom(int startIndex) {
     // draw from a certain point to the end
-    drawFromTo(startIndex, anchorPoints.size() - (closedCurve ? 1 : 2));
+    drawFromTo(startIndex, anchorPoints.size() - (m_closedCurve ? 1 : 2));
   }
   
   void drawFromTo(int startIndex, int endIndex) {
     // draw some of the segments
     noFill();
     startIndex = max(startIndex, 0);
-    endIndex = min(endIndex, anchorPoints.size() - (closedCurve ? 1 : 2));
+    endIndex = min(endIndex, anchorPoints.size() - (m_closedCurve ? 1 : 2));
     int nextIdx;
     int pointsCnt = anchorPoints.size();
     
@@ -98,7 +120,7 @@ class BezierLine {
   void drawFromToTranslate(int startIndex, int endIndex, PVector transVec) {
     noFill();
     startIndex = max(startIndex, 0);
-    endIndex = min(endIndex, anchorPoints.size() - (closedCurve ? 1 : 2));
+    endIndex = min(endIndex, anchorPoints.size() - (m_closedCurve ? 1 : 2));
     int nextIdx;
     int pointsCnt = anchorPoints.size();
     
@@ -110,7 +132,15 @@ class BezierLine {
              anchorPoints.get(nextIdx).x + transVec.x, anchorPoints.get(nextIdx).y + transVec.y);
     }
   }
- 
+  
+  void drawAnchorPoints() {
+    int savedStrokeColor = g.strokeColor;
+    stroke (0,0,255);
+    for (PVector point : anchorPoints) {
+      circle(point.x, point.y,5);
+    }
+    stroke(savedStrokeColor);
+  }
  
   private void updateControlPoints() {
     // this is the smart part of the class 
@@ -157,7 +187,7 @@ class BezierLine {
     int previousPointIdx;
     int nextPointIdx;
     
-    if (closedCurve) {
+    if (m_closedCurve) {
       // a closed curve
       int pointsCnt = anchorPoints.size();
       previousPointIdx = ((i - 1) % pointsCnt + pointsCnt) % pointsCnt; // wrap around if necessary, ensure index is positive
@@ -179,8 +209,8 @@ class BezierLine {
     // Now we calculate how far away form the point the two control points should be (while still on that imaginary straight line)
     
         
-    float controlDistLeft = anchorPoints.get(i).dist(anchorPoints.get(previousPointIdx)) * ctrlPointDistFactor;
-    float controlDistRight = anchorPoints.get(i).dist(anchorPoints.get(nextPointIdx)) * ctrlPointDistFactor;
+    float controlDistLeft = anchorPoints.get(i).dist(anchorPoints.get(previousPointIdx)) * m_swell;
+    float controlDistRight = anchorPoints.get(i).dist(anchorPoints.get(nextPointIdx)) * m_swell;
     
     ctrlPointsL.set(i, PVector.sub(anchorPoints.get(i), tangent.copy().mult(controlDistLeft)));
     ctrlPointsR.set(i, PVector.add(anchorPoints.get(i), tangent.copy().mult(controlDistRight)));
@@ -224,7 +254,7 @@ class BezierLine {
     pathData.append("M" + formatNumber(start.x) + " " + formatNumber(start.y));
   
     // Iterate through the list of points and append the Bezier curve commands
-    for (int i = 0 + clipStart; i <= (pointsCnt - (closedCurve ? 1 : 2) - clipEnd); i++) {
+    for (int i = 0 + clipStart; i <= (pointsCnt - (m_closedCurve ? 1 : 2) - clipEnd); i++) {
       nextIdx = (i + 1) % pointsCnt; // in case it wraps
       PVector cp1 = ctrlPointsR.get(i);
       PVector cp2 = ctrlPointsL.get(nextIdx);
@@ -257,7 +287,7 @@ class BezierLine {
     
   float getLength(int samplesPerSegment) {
     // return the length of the whole line. Usually about 5 samplesPerSegment is precise enough
-    return getLength(0, anchorPoints.size() - (closedCurve ? 1 : 2), samplesPerSegment);
+    return getLength(0, anchorPoints.size() - (m_closedCurve ? 1 : 2), samplesPerSegment);
   }
   
   float getLength(int startIndex, int endIndex, int samplesPerSegment) {
@@ -267,7 +297,7 @@ class BezierLine {
     int pointsCnt = anchorPoints.size();
     
     startIndex = max(startIndex, 0);
-    endIndex = min(endIndex, anchorPoints.size() - (closedCurve ? 1 : 2));
+    endIndex = min(endIndex, anchorPoints.size() - (m_closedCurve ? 1 : 2));
     for (int i = startIndex; i <= endIndex; i++) {
       totalLength += 
       bezierLength(anchorPoints.get(i), ctrlPointsR.get(i), ctrlPointsL.get((i+1) % pointsCnt), anchorPoints.get((i+1) % pointsCnt), samplesPerSegment);
@@ -303,7 +333,7 @@ class BezierLine {
     int pointsCnt = anchorPoints.size();
   
     // Iterate over each segment and calculate lengths more accurately
-    for (int i = 0; i <= pointsCnt - (closedCurve ? 1 : 2); i++) {
+    for (int i = 0; i <= pointsCnt - (m_closedCurve ? 1 : 2); i++) {
       PVector p0 = anchorPoints.get(i);
       PVector p1 = ctrlPointsR.get(i);
       PVector p2 = ctrlPointsL.get((i + 1) % pointsCnt);
@@ -329,7 +359,7 @@ class BezierLine {
     }
   
     // If we reach here, return the last point on the curve (distPct was 1.0)
-    return (closedCurve ? anchorPoints.get(0) : anchorPoints.get(pointsCnt - 1));    
+    return (m_closedCurve ? anchorPoints.get(0) : anchorPoints.get(pointsCnt - 1));    
   }
 
   PVector[] getEquidistantPointArr(int numPoints) {
@@ -340,7 +370,7 @@ class BezierLine {
     float totalLength = getLength(100);  // Or another appropriate number of samples per segment
     
     // Determine the distance between each point
-    float distanceBetweenPoints = totalLength / (numPoints - (closedCurve ? 0 : 1));
+    float distanceBetweenPoints = totalLength / (numPoints - (m_closedCurve ? 0 : 1));
   
     // Array to store the equidistant points
     PVector[] equidistantPoints = new PVector[numPoints];
@@ -353,7 +383,7 @@ class BezierLine {
     int currentPointIndex = 1;
   
     // Loop over each segment to find equidistant points
-    for (int i = 0; i <= pointsCnt - (closedCurve ? 1 : 2); i++) {
+    for (int i = 0; i <= pointsCnt - (m_closedCurve ? 1 : 2); i++) {
       PVector p0 = anchorPoints.get(i);
       PVector p1 = ctrlPointsR.get(i);
       PVector p2 = ctrlPointsL.get((i + 1) % pointsCnt);
@@ -380,7 +410,7 @@ class BezierLine {
     }
   
     // Ensure the last point is the end of the curve (unless it´s a closed curve, then we should never get here)
-    if (currentPointIndex < numPoints && !closedCurve) {
+    if (currentPointIndex < numPoints && !m_closedCurve) {
       equidistantPoints[currentPointIndex] = anchorPoints.get(pointsCnt - 1);
     }
   
